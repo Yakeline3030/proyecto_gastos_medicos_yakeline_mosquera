@@ -1,0 +1,152 @@
+
+---
+title: "Análisis Predictivo de Gastos Médicos"
+author: "Yakeline Mosquera"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(tidyverse)
+library(caret)
+library(randomForest)
+library(forecast)
+library(Metrics)
+library(ggplot2)
+```
+
+
+## Preparación de Datos
+
+```{r}
+# Carga optimizada
+options(timeout = 60)
+df <- read.csv("https://raw.githubusercontent.com/jdvelasq/datalabs/master/datasets/insurance.csv")
+
+df$sex <- as.factor(df$sex)
+df$smoker <- as.factor(df$smoker)
+df$region <- as.factor(df$region)
+```
+
+## Análisis Descriptivo
+
+```{r}
+# Histograma de gastos médicos
+ggplot(df, aes(x = charges)) +
+  geom_histogram(fill = "steelblue", bins = 30) +
+  labs(title = "Distribución de los gastos médicos", x = "Gasto médico", y = "Frecuencia")
+
+# Boxplot por tabaquismo
+ggplot(df, aes(x = smoker, y = charges)) +
+  geom_boxplot(fill = "tomato") +
+  labs(title = "Gasto médico según hábito de fumar", x = "Fumador", y = "Gasto médico")
+
+# Dispersión edad vs gastos
+ggplot(df, aes(x = age, y = charges, color = smoker)) +
+  geom_point(alpha = 0.5) +
+  labs(title = "Edad vs Gasto médico", x = "Edad", y = "Gasto médico")
+```
+
+
+```{r}
+df <- read.csv("https://raw.githubusercontent.com/jdvelasq/datalabs/master/datasets/insurance.csv")
+df$sex <- as.factor(df$sex)
+df$smoker <- as.factor(df$smoker)
+df$region <- as.factor(df$region)
+
+set.seed(42)
+dummies <- dummyVars(charges ~ ., data = df)
+X <- predict(dummies, newdata = df)
+y <- df$charges
+
+trainIndex <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X[trainIndex, ]
+X_test <- X[-trainIndex, ]
+y_train <- y[trainIndex]
+y_test <- y[-trainIndex]
+```
+
+## Regresión Lineal
+
+```{r}
+modelo_lm <- train(x = X_train, y = y_train, method = "lm")
+pred_lm <- predict(modelo_lm, X_test)
+```
+
+## Random Forest
+
+```{r}
+modelo_rf <- train(x = X_train, y = y_train, method = "rf")
+pred_rf <- predict(modelo_rf, X_test)
+```
+
+## K-Nearest Neighbors (KNN)
+
+```{r}
+modelo_knn <- train(x = X_train, y = y_train, method = "knn", tuneLength = 5)
+pred_knn <- predict(modelo_knn, X_test)
+```
+
+## Holt-Winters (serie sintética)
+
+```{r}
+df_ts <- df %>%
+  mutate(mes = rep(1:12, length.out = n())) %>%
+  group_by(mes) %>%
+  summarise(gasto = mean(charges))
+
+serie_ts <- ts(df_ts$gasto, frequency = 12)
+
+if (length(serie_ts) >= 24) {
+  modelo_hw <- HoltWinters(serie_ts)
+  pred_hw <- forecast(modelo_hw, h = 4)
+  plot(pred_hw)
+} else {
+  cat("Serie demasiado corta para aplicar Holt-Winters.")
+}
+```
+
+## ARIMA
+
+```{r}
+modelo_arima <- auto.arima(serie_ts)
+pred_arima <- forecast(modelo_arima, h = 4)
+plot(pred_arima)
+```
+
+## Evaluación de Modelos (RMSE y MAE)
+
+```{r}
+resultados <- data.frame(
+  Modelo = c("Regresión Lineal", "Random Forest", "KNN"),
+  RMSE = c(rmse(y_test, pred_lm), rmse(y_test, pred_rf), rmse(y_test, pred_knn)),
+  MAE = c(mae(y_test, pred_lm), mae(y_test, pred_rf), mae(y_test, pred_knn))
+)
+resultados
+```
+
+## Comparación Visual
+
+```{r}
+library(reshape2)
+resultados_melt <- melt(resultados, id.vars = "Modelo")
+
+ggplot(resultados_melt, aes(x = Modelo, y = value, fill = variable)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "Comparación de modelos según RMSE y MAE", x = "Modelo", y = "Error", fill = "Métrica") +
+  theme_minimal()
+```
+
+## Interpretación de Resultados
+
+```{r}
+cat("• Regresión Lineal permite ver la relación lineal entre variables, pero puede subestimar relaciones no lineales.
+")
+cat("• Random Forest captura relaciones no lineales y suele tener mejor desempeño predictivo.
+")
+cat("• KNN funciona con base en proximidad, útil para identificar patrones similares.
+")
+cat("• Holt-Winters y ARIMA aplican sobre series sintéticas para simular variación mensual.
+")
+cat("• RMSE penaliza más los errores grandes, mientras que MAE da el promedio de los errores absolutos.")
+```
